@@ -368,6 +368,8 @@ const WIKI_GUESSES = [
   ...["spiken", "kommn", "jgs", "playboy_pikachu", "kth", "media_neko", "metacrew"].map(p => "ovvar:patch_" + p),
   // tools and blocks from the wiki
   "polydecorations:hammer", "polydecorations:trowel", "metacraft:echo_fork", "metacraft:void_anchor",
+  // tier 3 bundle upgrade template: echo shards on the corners, like the tier 2 one has amethyst shards
+  "metacraft:echo_bundle_upgrade",
 ];
 for (const id of WIKI_GUESSES) {
   POSSIBLE.add(id);
@@ -425,6 +427,8 @@ const MOD_NOTES = [
   [/^moredyes:.*_(slab|stairs|cushion|pane)$/, () => "Crafted from the full block in that colour, like the vanilla version."],
   [/^metacraft_bundles:.*tier_2$/, () => "A bundle upgraded with the tier 2 bundle upgrade template (holds 2 stacks)."],
   [/^metacraft_bundles:.*tier_3$/, () => "A tier 2 bundle upgraded with the tier 3 bundle upgrade template (holds 3 stacks)."],
+  [/^metacraft:amethyst_bundle_upgrade$/, () => "Tier 2 bundle upgrade template. Crafted: amethyst shards in the corners, eyes of ender on the sides, a diamond in the middle."],
+  [/^metacraft:echo_bundle_upgrade$/, () => "Tier 3 bundle upgrade template. Crafted: echo shards in the corners, eyes of ender on the sides, leather in the middle."],
   [/^metacraft:.*bundle_upgrade$/, () => "Bundle upgrade template; see /polydex in game for the recipe."],
   [/^polydecorations:canvas$/, () => "Crafted: a paper in the middle with eight sticks round it."],
   [/^polydecorations:.*_mailbox$/, () => "Crafted from a log and slabs of that wood (makes two)."],
