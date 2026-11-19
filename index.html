@@ -70,6 +70,12 @@
   .where li { padding:3px 0; border-bottom:1px solid var(--line); }
   .where a { color:var(--east); cursor:pointer; text-decoration:none; font-weight:600; } .where a:hover { text-decoration:underline; }
   #mBody h3 { font-size:13px; margin:4px 0 6px; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; }
+  .fsearch { position:relative; }
+  .fsearch input { width:210px; }
+  #fres { position:absolute; top:100%; left:0; z-index:20; margin-top:3px; background:var(--panel); border:1px solid var(--line); border-radius:6px; min-width:300px; max-height:340px; overflow:auto; box-shadow:0 6px 20px #0008; }
+  #fres div { padding:6px 10px; cursor:pointer; display:flex; justify-content:space-between; gap:12px; }
+  #fres div:hover, #fres div.sel { background:#2c313b; }
+  #fres .kind { color:var(--dim); font-size:12px; white-space:nowrap; }
   .tag.guess { background:#3b3f4a; color:#cfd3dc; border:1px dashed #8a90a0; }
 </style>
 </head>
@@ -86,6 +92,7 @@
   <div class="controls">
     <label>Team <select id="team"><option value="east">East</option><option value="west">West</option><option value="south">South</option></select></label>
     <input type="search" id="q" placeholder="Search missing items…">
+    <span class="fsearch"><input type="search" id="fsearch" placeholder="Find a category or place…" autocomplete="off"><div id="fres" hidden></div></span>
     <label>Category <select id="cat"><option value="">All categories</option></select></label>
     <label>Found in <select id="src"><option value="">Anywhere</option></select></label>
     <label>Sort <select id="sort">
@@ -572,6 +579,51 @@ $("modal").addEventListener("click", e => { if (e.target === $("modal")) $("moda
   $("src").value = localStorage.getItem("museumSrc") || "";
   if ($("src").selectedIndex < 0) $("src").value = "";
   $("src").addEventListener("change", e => localStorage.setItem("museumSrc", e.target.value));
+}
+// ---- search box for the Category / Found in dropdowns ----------------------------
+{
+  const box = $("fsearch"), res = $("fres");
+  let matches = [], selIdx = 0;
+  const choices = () => [
+    ...[...$("cat").options].map(o => ({ sel: "cat", value: o.value, label: o.textContent, kind: "Category" })),
+    ...[...$("src").options].map(o => ({ sel: "src", value: o.value, label: o.textContent,
+                                         kind: o.parentElement.label === "Dropped by" ? "Dropped by (mob)" : "Found in · " + o.parentElement.label })),
+  ].filter(c => c.value !== "");
+  function show() {
+    const q = box.value.trim().toLowerCase();
+    if (!q) { res.hidden = true; return; }
+    const words = q.split(/\s+/);
+    matches = choices().filter(c => words.every(w => c.label.toLowerCase().includes(w) || c.kind.toLowerCase().includes(w)))
+      .sort((a, b) => a.label.toLowerCase().startsWith(q) ? -1 : b.label.toLowerCase().startsWith(q) ? 1 : 0);
+    selIdx = 0;
+    res.replaceChildren(...(matches.length ? matches : [null]).map((c, i) => {
+      const d = document.createElement("div");
+      if (!c) { d.textContent = "No matching category or place"; d.className = "kind"; return d; }
+      if (i === selIdx) d.className = "sel";
+      d.append(span("", c.label), span("kind", c.kind));
+      d.addEventListener("mousedown", e => { e.preventDefault(); pick(c); });
+      return d;
+    }));
+    res.hidden = false;
+  }
+  function pick(c) {
+    const el = $(c.sel); el.value = c.value;
+    el.dispatchEvent(new Event("change")); el.dispatchEvent(new Event("input"));
+    box.value = ""; res.hidden = true; box.blur();
+  }
+  box.addEventListener("input", show);
+  box.addEventListener("focus", show);
+  box.addEventListener("blur", () => { res.hidden = true; });
+  box.addEventListener("keydown", e => {
+    if (res.hidden || !matches.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      selIdx = (selIdx + (e.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length;
+      [...res.children].forEach((d, i) => d.classList.toggle("sel", i === selIdx));
+      res.children[selIdx].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") { e.preventDefault(); pick(matches[selIdx]); }
+    else if (e.key === "Escape") { box.value = ""; res.hidden = true; }
+  });
 }
 for (const id of ["q", "src", "cat", "sort", "hideCreative", "onlyOthers", "onlyCraftable", "showPossible"]) $(id).addEventListener("input", render);
 $("showFeed").addEventListener("input", e => document.querySelector("main").classList.toggle("nofeed", !e.target.checked));
