@@ -65,6 +65,9 @@
   @media (hover:none) { .item .hide { visibility:visible; } }
   .icon.swatch { border-radius:4px; border:2px solid #0006; display:flex; align-items:flex-end; justify-content:flex-end; font-size:9px; font-weight:700; color:#fff; text-shadow:1px 1px 0 #000; padding:1px; }
   .item.fresh { background:#1b2a3a; border-color:#2d5878; } .item.fresh:hover { border-color:#4f8fbf; }
+  .item.have { background:#1a2b20; border-color:#2f5c3a; } .item.have:hover { border-color:#4f9f63; }
+  .item.have .name { color:#b9dcc2; }
+  .tag.done { background:#2f6b3f; color:#e4ffe9; }
   .legend { display:inline-block; width:12px; height:12px; border-radius:3px; background:#1b2a3a; border:1px solid #2d5878; vertical-align:-2px; margin-right:4px; }
   .where { margin:4px 0 16px; padding:0; list-style:none; }
   .where li { padding:3px 0; border-bottom:1px solid var(--line); }
@@ -91,7 +94,12 @@
   </div>
   <div class="controls">
     <label>Team <select id="team"><option value="east">East</option><option value="west">West</option><option value="south">South</option></select></label>
-    <input type="search" id="q" placeholder="Search missing items…">
+    <label>Show <select id="view">
+      <option value="missing">Missing items</option>
+      <option value="have">Already submitted</option>
+      <option value="all">Everything</option>
+    </select></label>
+    <input type="search" id="q" placeholder="Search items…">
     <span class="fsearch"><input type="search" id="fsearch" placeholder="Find a category or place…" autocomplete="off"><div id="fres" hidden></div></span>
     <label>Category <select id="cat"><option value="">All categories</option></select></label>
     <label>Found in <select id="src"><option value="">Anywhere</option></select></label>
@@ -100,6 +108,7 @@
       <option value="easy">Easiest first</option>
       <option value="hard">Hardest first</option>
       <option value="name">A–Z</option>
+      <option value="recent">Newest submissions first</option>
     </select></label>
     <label><input type="checkbox" id="hideCreative" checked> Hide items you can't get in survival (<span id="coCount"></span>)</label>
     <label><input type="checkbox" id="onlyOthers"> Only items another team has</label>
@@ -264,6 +273,7 @@ function recipeEl(id, r) {
   return box;
 }
 
+const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 function openItem(id, push = true) {
   const m = $("modal");
   if (!m.open) modalHistory = [];
@@ -276,7 +286,8 @@ function openItem(id, push = true) {
   const sub = document.createElement("div"); sub.className = "dim";
   const d = difficulty(id), mine = have[team]?.has(id), who = TEAMS.filter(x => x !== team && have[x]?.has(id));
   sub.append(span("tag d" + d, TIER_NAMES[d]), " ",
-             mine ? `✔ ${cap(team)} has submitted this` : `✘ ${cap(team)} still needs this`,
+             mine ? `✔ ${cap(team)} has submitted this` + (subInfo[team].get(id)?.at ? ` (${fmtWhen(subInfo[team].get(id).at)})` : "")
+                  : `✘ ${cap(team)} still needs this`,
              who.length ? ` · also collected by ${who.map(cap).join(", ")}` : "");
   t.append(sub); head.append(t);
 
@@ -474,6 +485,7 @@ const params = new URLSearchParams(location.search);
 let team = params.get("team") || localStorage.getItem("museumTeam") || "east";
 const have = { east: null, west: null, south: null };   // Set of item ids per team
 const score = {};
+const subInfo = { east: new Map(), west: new Map(), south: new Map() };   // itemId -> { players, at }
 let lastRecent = "";        // newest submittedAt seen in the recent feed
 let lastFull = 0;
 
@@ -510,6 +522,7 @@ async function loadTeams() {
   results.forEach((d, k) => {
     const t = TEAMS[k];
     have[t] = new Set(d.items.map(x => x.itemId));
+    subInfo[t] = new Map(d.items.map(x => [x.itemId, { players: x.players, at: x.firstSubmittedAt }]));
     score[t] = d.score;
     // items the server knows that aren't in our list (future versions) get added
     for (const id of have[t]) if (!spriteIdx.has(id)) { spriteIdx.set(id, -1); allIds.push(id); }
@@ -556,14 +569,17 @@ function render() {
   $("coCount").textContent = allIds.filter(isCreativeOnly).length;
   document.title = `${missingAll.length} missing – ${team} museum tracker`;
 
-  let list = missingAll.map(id => ({ id, name: prettyName(id), who: others.filter(t => have[t]?.has(id)), diff: difficulty(id) }));
+  const view = $("view").value;
+  const base = view === "missing" ? missingAll : view === "have" ? pool.filter(id => mine.has(id)) : pool;
+  let list = base.map(id => ({ id, name: prettyName(id), who: others.filter(t => have[t]?.has(id)), diff: difficulty(id),
+                               mine: mine.has(id), at: subInfo[team].get(id)?.at || "" }));
   const catSel = $("cat"), cat = catSel.value;
-  const visible = missingAll.filter(id => !hidden.has(id));
+  const visible = base.filter(id => !hidden.has(id));
   for (const o of catSel.options) {
     const n = visible.filter(id => inCategory(id, o.value)).length;
     o.textContent = (o.value || "All categories") + ` (${n})`;
   }
-  const hiddenMissing = missingAll.filter(id => hidden.has(id)).length;
+  const hiddenMissing = base.filter(id => hidden.has(id)).length;
   $("unhide").disabled = !hidden.size;
   $("unhide").textContent = hidden.size ? `Unhide all (${hiddenMissing} hidden)` : "Unhide all";
   const srcSel = $("src"), src = srcSel.value === "" ? -1 : +srcSel.value;
@@ -582,24 +598,30 @@ function render() {
     easy: (a, b) => a.diff - b.diff || byOthers(a, b),
     hard: (a, b) => b.diff - a.diff || byOthers(a, b),
     name: (a, b) => a.name.localeCompare(b.name),
+    recent: (a, b) => b.at.localeCompare(a.at) || byOthers(a, b),
   };
   list.sort(sorts[$("sort").value]);
 
   const grid = $("grid");
   grid.replaceChildren();
   for (const x of list) grid.append(itemEl(x));
-  if (!list.length) grid.innerHTML = `<div class="empty">Nothing missing here 🎉</div>`;
+  if (!list.length) grid.innerHTML = `<div class="empty">${view === "missing" ? "Nothing missing here 🎉" : "No items match"}</div>`;
 }
 
 function itemEl(x, gone = false) {
   const el = document.createElement("div");
-  el.className = "item" + (gone ? " gone" : "") + (x.who.length ? "" : " fresh");
+  el.className = "item" + (gone ? " gone" : "") + (x.mine ? " have" : x.who.length ? "" : " fresh");
   el.dataset.id = x.id;
   el.title = x.id + `
 Difficulty: ${TIER_NAMES[x.diff]}` + (x.who.length ? `\nAlready collected by: ${x.who.join(", ")}` : "");
   el.append(iconEl(x.id));
   const n = document.createElement("span"); n.className = "name"; n.textContent = x.name; el.append(n);
   const tags = document.createElement("span"); tags.className = "tags";
+  if (x.mine) {
+    const s = document.createElement("span"); s.className = "tag done"; s.textContent = "✓";
+    s.title = `${cap(team)} submitted this` + (x.at ? ` on ${fmtWhen(x.at)}` : "");
+    tags.append(s);
+  }
   for (const t of x.who) { const s = document.createElement("span"); s.className = "tag " + t; s.textContent = t[0].toUpperCase(); tags.append(s); }
   if (isMod(x.id)) { const s = document.createElement("span"); s.className = "tag co"; s.textContent = "mod"; tags.append(s); }
   if (isGuess(x.id)) { const s = document.createElement("span"); s.className = "tag guess"; s.textContent = "possible"; s.title = "Nobody has submitted this yet, so it's a guess that it exists"; tags.append(s); }
@@ -703,7 +725,10 @@ $("modal").addEventListener("click", e => { if (e.target === $("modal")) $("moda
     else if (e.key === "Escape") { box.value = ""; res.hidden = true; }
   });
 }
-for (const id of ["q", "src", "cat", "sort", "hideCreative", "onlyOthers", "onlyCraftable", "showPossible"]) $(id).addEventListener("input", render);
+$("view").value = localStorage.getItem("museumView") || "missing";
+if ($("view").selectedIndex < 0) $("view").value = "missing";
+$("view").addEventListener("change", e => localStorage.setItem("museumView", e.target.value));
+for (const id of ["q", "src", "cat", "sort", "view", "hideCreative", "onlyOthers", "onlyCraftable", "showPossible"]) $(id).addEventListener("input", render);
 $("showFeed").addEventListener("input", e => document.querySelector("main").classList.toggle("nofeed", !e.target.checked));
 $("team").addEventListener("change", e => {
   team = e.target.value; localStorage.setItem("museumTeam", team); render();
