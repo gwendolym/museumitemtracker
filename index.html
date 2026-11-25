@@ -111,6 +111,7 @@
       <option value="recent">Newest submissions first</option>
     </select></label>
     <label><input type="checkbox" id="hideCreative" checked> Hide items you can't get in survival (<span id="coCount"></span>)</label>
+    <label title="Items you can only get in the End, or that need something from the End to craft or brew (shulker boxes, purpur, lingering potions…)"><input type="checkbox" id="hideEnd"> Hide items that need the End (<span id="endCount"></span>)</label>
     <label><input type="checkbox" id="onlyOthers"> Only items another team has</label>
     <label><input type="checkbox" id="onlyCraftable"> Only craftable</label>
     <label title="RGB, Cerise and Laser Violet versions of every colourful block. Guessed from the items already submitted; marked 'possible' until someone submits one."><input type="checkbox" id="showPossible" checked> Include possible new-colour items</label>
@@ -453,6 +454,39 @@ const MOD_NOTES = [
   [/^pirkko:/, () => "Can't be crafted or dyed: the only way to get a colour is to kill a Pirkko of that colour."],
 ];
 const modNote = id => { for (const [re, fn] of MOD_NOTES) { const m = id.match(re); if (m) return fn(m); } return null; };
+// ---- items that need the End --------------------------------------------------
+// An item needs the End if it only comes from End places/mobs, or every way to craft/brew it uses
+// an ingredient that needs the End (e.g. shulker boxes, purpur stairs, lingering potions, tipped arrows).
+const END_PLACES = new Set(SOURCES.places.map((p, i) => [p[0], i]).filter(([n]) => ["End city", "Ender Dragon", "Shulker"].includes(n)).map(([, i]) => i));
+const END_BASE = new Set(["end_stone", "chorus_fruit", "chorus_flower", "chorus_plant", "purpur_block", "purpur_pillar", "end_rod",
+  "shulker_shell", "elytra", "dragon_egg", "dragon_head", "dragon_breath", "spire_armor_trim_smithing_template"]);
+const END_MOD_RE = /(shulker_box|purpur|end_stone|chorus|end_rod|elytra|dragon)/;
+const endMemo = new Map();
+function ingNeedsEnd(i) {
+  if (!i) return false;
+  const items = RECIPE_DATA.ings[i - 1].slice(1);
+  // Options that loop back to an item still being worked out are skipped; the ingredient needs the End
+  // only if there are other options and all of them do (e.g. "any shulker box" in the dye recipe).
+  const opts = items.map(x => x.includes(":") ? x : "minecraft:" + x).filter(x => endMemo.get(x.replace(/^minecraft:/, "")) !== null);
+  return opts.length > 0 && opts.every(needsEnd);
+}
+function recipeNeedsEnd(r) {
+  const [kind] = r;
+  const ings = kind === "c" ? r[3] : kind === "s" ? r[2] : kind === "m" ? r.slice(2, 5) : kind === "w" ? r.slice(2, 4) : [r[2]];
+  return ings.some(ingNeedsEnd);
+}
+function needsEnd(id) {
+  const short = id.replace(/^minecraft:/, "");
+  if (isMod(id)) return END_MOD_RE.test(short);
+  if (END_BASE.has(short)) return true;
+  if (endMemo.has(short)) return endMemo.get(short) === true;
+  endMemo.set(short, null);  // in progress (see ingNeedsEnd)
+  const src = SOURCES.items[short] || [], rs = RECIPE_DATA.recipes[short] || [];
+  const endSrc = src.some(([p]) => END_PLACES.has(p)), otherSrc = src.some(([p]) => !END_PLACES.has(p));
+  const res = !otherSrc && (endSrc || rs.length > 0) && rs.every(recipeNeedsEnd);
+  endMemo.set(short, res);
+  return res;
+}
 const hasSource = (id, pi) => sourcesFor(id).some(([p]) => p === pi);
 
 // ---- categories -------------------------------------------------------------
@@ -557,7 +591,9 @@ function render() {
   const q = $("q").value.trim().toLowerCase();
 
   const showPossible = $("showPossible").checked;
-  const pool = allIds.filter(id => (!hideCo || !isCreativeOnly(id)) && (showPossible || !isGuess(id)));
+  const hideEnd = $("hideEnd").checked;
+  const pool = allIds.filter(id => (!hideCo || !isCreativeOnly(id)) && (showPossible || !isGuess(id)) && (!hideEnd || !needsEnd(id)));
+  $("endCount").textContent = allIds.filter(id => !mine.has(id) && (showPossible || !isGuess(id)) && needsEnd(id)).length + " missing";
   const missingAll = pool.filter(id => !mine.has(id));
   $("teamName").textContent = team[0].toUpperCase() + team.slice(1);
   $("missingCount").textContent = missingAll.length;
@@ -728,7 +764,9 @@ $("modal").addEventListener("click", e => { if (e.target === $("modal")) $("moda
 $("view").value = localStorage.getItem("museumView") || "missing";
 if ($("view").selectedIndex < 0) $("view").value = "missing";
 $("view").addEventListener("change", e => localStorage.setItem("museumView", e.target.value));
-for (const id of ["q", "src", "cat", "sort", "view", "hideCreative", "onlyOthers", "onlyCraftable", "showPossible"]) $(id).addEventListener("input", render);
+for (const id of ["q", "src", "cat", "sort", "view", "hideCreative", "onlyOthers", "onlyCraftable", "showPossible", "hideEnd"]) $(id).addEventListener("input", render);
+$("hideEnd").checked = localStorage.getItem("museumHideEnd") === "1";
+$("hideEnd").addEventListener("change", e => localStorage.setItem("museumHideEnd", e.target.checked ? "1" : "0"));
 $("showFeed").addEventListener("input", e => document.querySelector("main").classList.toggle("nofeed", !e.target.checked));
 $("team").addEventListener("change", e => {
   team = e.target.value; localStorage.setItem("museumTeam", team); render();
